@@ -1,0 +1,58 @@
+# This workflow will build a Swift project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
+
+name: Build iOS app (unsigned IPA)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # macos-26 ships Xcode 26 (iOS 26 SDK, Liquid Glass). If this label is ever unavailable, use macos-latest.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode
+        run: xcodebuild -version
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          # Try the requested minimum iOS 11 first. Current Xcode versions only support newer
+          # deployment targets, so fall back step by step and record what worked.
+          for DT in 11.0 12.0 13.0 15.0; do
+            echo "=== Building with deployment target $DT ==="
+            if xcodebuild \
+                -project ZXTapeLoader.xcodeproj \
+                -scheme ZXTapeLoader \
+                -configuration Release \
+                -sdk iphoneos \
+                -derivedDataPath build \
+                IPHONEOS_DEPLOYMENT_TARGET=$DT \
+                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+                build; then
+              echo "$DT" > deployment-target-used.txt
+              break
+            fi
+          done
+          test -f deployment-target-used.txt
+          echo "Built with minimum iOS $(cat deployment-target-used.txt)"
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/ZXTapeLoader.app Payload/
+          zip -qry ZXTapeLoader-unsigned.ipa Payload
+          echo "Minimum iOS: $(cat deployment-target-used.txt)" > build-info.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZXTapeLoader-unsigned-ipa
+          path: |
+            ZXTapeLoader-unsigned.ipa
+            build-info.txt
+          if-no-files-found: error
